@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>People Detection</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+    <div class="container">
+        <h1>Real-Time People Detection</h1>
+
+        <div class="grid-container">
+            <div class="video-container">
+                <img id="videoFeed" src="{{ url_for('video_feed') }}" width="640" height="480">
+            </div>
+
+            <div class="registros-container">
+                <h2>Últimas Detecções</h2>
+                <table id="tabelaRegistros">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Entrada</th>
+                            <th>Saída</th>
+                            <th>Duração (s)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Dados serão preenchidos via JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="chart-container">
+            <div class="chart-header">
+                <h2>Entradas por Mês</h2>
+                <button id="btnAtualizar" onclick="atualizarGrafico()" class="btn-atualizar">
+                    ↻ Atualizar Gráfico
+                </button>
+            </div>
+            <canvas id="entradasChart"></canvas>
+        </div>
+
+    </div>
+
+    <script>
+        // Variáveis globais
+        let entradasChart = null;
+        let tabelaUpdateInterval = null;
+        const COMPONENT_LOAD_DELAY = 500; // Delay entre carregamentos em ms
+
+        // Função principal quando o DOM estiver pronto
+        document.addEventListener('DOMContentLoaded', function () {
+            // Sequência de carregamento controlada
+            setTimeout(() => {
+                carregarTabela().then(() => {
+                    setTimeout(() => {
+                        carregarGrafico().then(() => {
+                            setTimeout(() => {
+                                iniciarVideoFeed();
+                            }, COMPONENT_LOAD_DELAY);
+                        });
+                    }, COMPONENT_LOAD_DELAY);
+                });
+            }, 0);
+        });
+
+        // 1. Função para carregar a tabela
+        function carregarTabela() {
+            return new Promise((resolve) => {
+                console.log('Iniciando carregamento da tabela...');
+
+                // Carregar imediatamente
+                atualizarTabela();
+
+                // Configurar intervalo de atualização
+                tabelaUpdateInterval = setInterval(atualizarTabela, 2000);
+
+                resolve();
+            });
+        }
+
+        // Função de atualização da tabela
+        function atualizarTabela() {
+            fetch('/api/registros')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`Erro HTTP: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // Verificação mais robusta da estrutura de dados
+                    if (!data || !data.data || !Array.isArray(data.data)) {
+                        throw new Error('Estrutura de dados inválida');
+                    }
+
+                    const tbody = document.querySelector('#tabelaRegistros tbody');
+                    tbody.innerHTML = ''; // Limpa a tabela
+
+                    if (data.data.length === 0) {
+                        tbody.innerHTML = `
+                    <tr>
+                        <td colspan="4" class="sem-dados">Nenhum registro encontrado</td>
+                    </tr>
+                `;
+                        return;
+                    }
+
+                    // Processa cada registro
+                    data.data.forEach(registro => {
+                        if (!registro || typeof registro !== 'object') return;
+
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                    <td>${registro.id || '--'}</td>
+                    <td>${formatarDataHora(registro.data_hora_entrada)}</td>
+                    <td>${registro.saida_formatada === 'Em andamento' ?
+                                '<span class="em-andamento">Em andamento</span>' :
+                                formatarDataHora(registro.saida_formatada)}</td>
+                    <td>${registro.duracao_formatada || '--'}</td>
+                `;
+                        tbody.appendChild(row);
+                    });
+                })
+                .catch(error => {
+                    console.error('Erro ao atualizar tabela:', error);
+                    const tbody = document.querySelector('#tabelaRegistros tbody');
+                    tbody.innerHTML = `
+                <tr>
+                    <td colspan="4" class="erro-carregamento">
+                        Erro ao carregar dados: ${error.message}
+                    </td>
+                </tr>
+            `;
+                });
+        }
+
+        // Função auxiliar para formatar data/hora
+        function formatarDataHora(dataString) {
+            if (!dataString || dataString === 'Em andamento') return dataString;
+            try {
+                const date = new Date(dataString);
+                return isNaN(date.getTime()) ? dataString : date.toLocaleString();
+            } catch {
+                return dataString;
+            }
+        }
+
+        // 2. Função para carregar o gráfico
+        function carregarGrafico() {
+            return new Promise((resolve) => {
+                console.log('Iniciando carregamento do gráfico...');
+
+                const btn = document.getElementById('btnAtualizar');
+                btn.disabled = true;
+                btn.textContent = 'Carregando...';
+
+                fetch('/api/entradas-por-mes')
+                    .then(response => {
+                        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.status !== 'success') throw new Error(data.message || 'Dados inválidos');
+
+                        renderizarGrafico(data.data);
+                        resolve();
+                    })
+                    .catch(error => {
+                        console.error('Erro no gráfico:', error);
+                        mostrarErroNoCanvas(error);
+                        resolve(); // Resolve mesmo com erro para continuar o fluxo
+                    })
+                    .finally(() => {
+                        btn.disabled = false;
+                        btn.textContent = '↻ Atualizar Gráfico';
+                    });
+            });
+        }
+
+        // Função para renderizar o gráfico
+        function renderizarGrafico(data) {
+            const ctx = document.getElementById('entradasChart').getContext('2d');
+
+            // Destruir gráfico anterior se existir
+            if (entradasChart) entradasChart.destroy();
+
+            entradasChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: data.labels || [],
+                    datasets: [{
+                        label: 'Entradas por Mês',
+                        data: data.values || [],
+                        backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                precision: 0,
+                                stepSize: 1
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 3. Função para iniciar o vídeo
+        function iniciarVideoFeed() {
+            console.log('Iniciando carregamento da câmera...');
+
+            const videoFeed = document.getElementById('videoFeed');
+            if (!videoFeed) return;
+
+            // Forçar novo carregamento com timestamp para evitar cache
+            videoFeed.src = "{{ url_for('video_feed') }}?" + Date.now();
+
+            // Tratamento de erro com retentativa
+            videoFeed.onerror = function () {
+                console.warn('Falha no vídeo, tentando novamente...');
+                setTimeout(() => {
+                    this.src = "{{ url_for('video_feed') }}?" + Date.now();
+                }, 2000);
+            };
+
+            // Evento de carregamento bem-sucedido
+            videoFeed.onload = function () {
+                console.log('Câmera carregada com sucesso');
+            };
+        }
+
+        // Funções auxiliares
+        function mostrarErroNoCanvas(error) {
+            const canvas = document.getElementById('entradasChart');
+            if (!canvas) return;
+
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.font = '14px Arial';
+            ctx.fillStyle = '#e74c3c';
+            ctx.textAlign = 'center';
+            ctx.fillText('Erro: ' + (error.message || 'Falha ao carregar'),
+                canvas.width / 2,
+                canvas.height / 2);
+        }
+
+        function formatarData(dataString) {
+            if (!dataString || dataString === 'Em andamento') return dataString;
+            try {
+                return new Date(dataString).toLocaleString();
+            } catch {
+                return dataString;
+            }
+        }
+
+        // Limpeza ao sair da página
+        window.addEventListener('beforeunload', function () {
+            if (tabelaUpdateInterval) clearInterval(tabelaUpdateInterval);
+            if (entradasChart) entradasChart.destroy();
+        });
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+</body>
+
+</html>
