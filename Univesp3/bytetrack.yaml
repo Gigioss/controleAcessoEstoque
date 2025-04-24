@@ -1,0 +1,22 @@
+# bytetrack.yaml - Configuração atualizada para Ultralytics 8.x+
+tracker_type: bytetrack
+
+# Configurações de detecção
+track_high_thresh: 0.5
+track_low_thresh: 0.1
+new_track_thresh: 0.6
+
+# Parâmetros de matching
+match_thresh: 0.8
+min_box_area: 100
+max_box_area: 100000
+
+# Configurações temporais
+frame_rate: 30
+track_buffer: 60
+
+# Configurações específicas
+cmc_method: "sparseOptFlow"  # Método de compensação de movimento
+with_reid: False             # Não usar re-identification
+proximity_thresh: 0.5
+appearance_thresh: 0.25
